@@ -130,12 +130,20 @@ url = args.url
 redirects = args.max_redirects
 
 headers = check_headers(url, redirects)
+okColor = '\033[92m'
+warnColor = '\033[93m'
+endColor = '\033[0m'
 for header, value in headers.iteritems():
     if value['warn'] == 1:
         if value['defined'] == False:
-            print 'WARNING! Header \'' + header + '\' is missing!'
+            print 'Header \'' + header + '\' is missing ... [ ' + warnColor + 'WARN' + endColor + ' ]'
         else:
-            print 'WARNING! Header \'' + header + '\' contains value ' + value['contents']
-
-
+            print 'Header \'' + header + '\' contains value ' + value['contents'] + \
+                ' ... [ ' + warnColor + 'WARN' + endColor + ']'
+    elif value['warn'] == 0:
+        if value['defined'] == False:
+            print 'Header \'' + header + '\' is missing ... [ ' + okColor + 'OK' + endColor +' ]'
+        else:
+            print 'Header \'' + header + '\' contains value ' + value['contents'] + \
+                ' ... [' + okColor + 'OK' + endColor + ']'
 

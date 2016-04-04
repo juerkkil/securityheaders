@@ -23,10 +23,14 @@ $
 
 ### Output
 ```
-$ python securityheaders.py http://www.secfault.fi
-WARNING! Header 'x-xss-protection' is missing!
-WARNING! Header 'x-content-type-options' is missing!
-WARNING! Header 'content-security-policy' is missing!
-WARNING! Header 'server' contains value nginx/1.8.1
+$ python securityheaders.py --max-redirects 5 https://secfault.fi
+Header 'x-xss-protection' is missing ... [ WARN ]
+Header 'x-content-type-options' is missing ... [ WARN ]
+Header 'content-security-policy' is missing ... [ WARN ]
+Header 'x-powered-by' is missing ... [ OK ]
+Header 'x-frame-options' contains value DENY ... [OK]
+Header 'strict-transport-security' contains value max-age=63072000 ... [OK]
+Header 'access-control-allow-origin' is missing ... [ OK ]
+Header 'server' contains value nginx/1.8.1 ... [ WARN]
 $
 ```
