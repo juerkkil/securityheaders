@@ -18,7 +18,7 @@ class SecurityHeaders():
             contents (str): Header contents (value)
         """
         warn = 1
-
+        
         if header == 'x-frame-options':
             if contents.lower() in ['deny', 'sameorigin']:
                 warn = 0
@@ -42,7 +42,7 @@ class SecurityHeaders():
             else:
                 warn = 0
     
-        if header == 'x-xss-protection':
+        if header.lower() == 'x-xss-protection':
             if contents.lower() in ['1', '1; mode=block']:
                 warn = 0
             else:
@@ -163,6 +163,7 @@ class SecurityHeaders():
             conn.request('HEAD', path)
             res = conn.getresponse()
             headers = res.getheaders()
+            
         except socket.gaierror:
             print('HTTP request failed')
             return False
@@ -175,8 +176,13 @@ class SecurityHeaders():
                 
         """ Loop through headers and evaluate the risk """
         for header in headers:
-            if (header[0] in retval):
-                retval[header[0]] = self.evaluate_warn(header[0], header[1])
+            
+            #set to lowercase before the check
+            headerAct = header[0].lower()
+            
+            if (headerAct in retval):
+
+                retval[headerAct] = self.evaluate_warn(headerAct, header[1])
 
         return retval
 
@@ -188,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-redirects', dest='max_redirects', metavar='N', default=2, type=int, help='Max redirects, set 0 to disable')
     args = parser.parse_args()
     url = args.url
+
     redirects = args.max_redirects
 
     foo = SecurityHeaders()
