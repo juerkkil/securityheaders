@@ -1,10 +1,10 @@
-import httplib
+import http.client
 import argparse
 import socket 
 import ssl
 import sys
 
-from urlparse import urlparse
+from urllib.parse import urlparse
 
 class SecurityHeaders():
     def __init__(self):
@@ -12,9 +12,7 @@ class SecurityHeaders():
 
     def evaluate_warn(self, header, contents):
         """ Risk evaluation function.
-
         Set header warning flag (1/0) according to its contents.
-
         Args:
             header (str): HTTP header name in lower-case
             contents (str): Header contents (value)
@@ -72,7 +70,7 @@ class SecurityHeaders():
         path = parsed[2]
         sslerror = False
             
-        conn = httplib.HTTPSConnection(hostname)
+        conn = http.client.HTTPSConnection(hostname)
         try:
             conn.request('GET', '/')
             res = conn.getresponse()
@@ -85,7 +83,7 @@ class SecurityHeaders():
 
         # if tls connection fails for unexcepted error, retry without verifying cert
         if sslerror:
-            conn = httplib.HTTPSConnection(hostname, timeout=5, context = ssl._create_unverified_context() )
+            conn = http.client.HTTPSConnection(hostname, timeout=5, context = ssl._create_unverified_context() )
             try:
                 conn.request('GET', '/')
                 res = conn.getresponse()
@@ -109,13 +107,13 @@ class SecurityHeaders():
             protocol = 'http'
 
         if (protocol == 'http'):
-            conn = httplib.HTTPConnection(hostname)
+            conn = http.client.HTTPConnection(hostname)
         try:
             conn.request('HEAD', path)
             res = conn.getresponse()
             headers = res.getheaders()
         except socket.gaierror:
-            print 'HTTP request failed'
+            print('HTTP request failed')
             return False
 
         """ Follow redirect """
@@ -129,7 +127,6 @@ class SecurityHeaders():
     def check_headers(self, url, follow_redirects = 0):
         """ Make the HTTP request and check if any of the pre-defined
         headers exists.
-
         Args:
             url (str): Target URL in format: scheme://hostname/path/to/file
             follow_redirects (Optional[str]): How deep we follow the redirects, 
@@ -153,11 +150,11 @@ class SecurityHeaders():
         hostname = parsed[1]
         path = parsed[2]
         if (protocol == 'http'):
-            conn = httplib.HTTPConnection(hostname)
+            conn = http.client.HTTPConnection(hostname)
         elif (protocol == 'https'):
                 # on error, retry without verifying cert
                 # in this context, we're not really interested in cert validity
-                conn = httplib.HTTPSConnection(hostname, context = ssl._create_unverified_context() )
+                conn = http.client.HTTPSConnection(hostname, context = ssl._create_unverified_context() )
         else:
             """ Unknown protocol scheme """
             return {}
@@ -167,7 +164,7 @@ class SecurityHeaders():
             res = conn.getresponse()
             headers = res.getheaders()
         except socket.gaierror:
-            print 'HTTP request failed'
+            print('HTTP request failed')
             return False
 
         """ Follow redirect """
@@ -208,34 +205,33 @@ if __name__ == "__main__":
     okColor = '\033[92m'
     warnColor = '\033[93m'
     endColor = '\033[0m'
-    for header, value in headers.iteritems():
+    for header, value in headers.items():
         if value['warn'] == 1:
             if value['defined'] == False:
-                print 'Header \'' + header + '\' is missing ... [ ' + warnColor + 'WARN' + endColor + ' ]'
+                print('Header \'' + header + '\' is missing ... [ ' + warnColor + 'WARN' + endColor + ' ]')
             else:
-                print 'Header \'' + header + '\' contains value \'' + value['contents'] + '\'' + \
-                    ' ... [ ' + warnColor + 'WARN' + endColor + ' ]'
+                print('Header \'' + header + '\' contains value \'' + value['contents'] + '\'' + \
+                    ' ... [ ' + warnColor + 'WARN' + endColor + ' ]')
         elif value['warn'] == 0:
             if value['defined'] == False:
-                print 'Header \'' + header + '\' is missing ... [ ' + okColor + 'OK' + endColor +' ]'
+                print('Header \'' + header + '\' is missing ... [ ' + okColor + 'OK' + endColor +' ]')
             else:
-                print 'Header \'' + header + '\' contains value \'' + value['contents'] + '\'' + \
-                    ' ... [ ' + okColor + 'OK' + endColor + ' ]'
+                print('Header \'' + header + '\' contains value \'' + value['contents'] + '\'' + \
+                    ' ... [ ' + okColor + 'OK' + endColor + ' ]')
 
     https = foo.test_https(url)
     if https['supported']:
-        print 'HTTPS supported ... [ ' + okColor + 'OK' + endColor + ' ]'
+        print('HTTPS supported ... [ ' + okColor + 'OK' + endColor + ' ]')
     else:
-        print 'HTTPS supported ... [ ' + warnColor + 'FAIL' + endColor + ' ]'
+        print('HTTPS supported ... [ ' + warnColor + 'FAIL' + endColor + ' ]')
 
     if https['certvalid']:
-        print 'HTTPS valid certificate ... [ ' + okColor + 'OK' + endColor + ' ]'
+        print('HTTPS valid certificate ... [ ' + okColor + 'OK' + endColor + ' ]')
     else:
-        print 'HTTPS valid certificate ... [ ' + warnColor + 'FAIL' + endColor + ' ]'
+        print('HTTPS valid certificate ... [ ' + warnColor + 'FAIL' + endColor + ' ]')
 
 
     if foo.test_http_to_https(url, 5):
-        print 'HTTP -> HTTPS redirect ... [ ' + okColor + 'OK' + endColor + ' ]'
+        print('HTTP -> HTTPS redirect ... [ ' + okColor + 'OK' + endColor + ' ]')
     else:
-        print 'HTTP -> HTTPS redirect ... [ ' + warnColor + 'FAIL' + endColor + ' ]'
-    
+        print('HTTP -> HTTPS redirect ... [ ' + warnColor + 'FAIL' + endColor + ' ]')
