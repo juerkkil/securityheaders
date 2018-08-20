@@ -18,13 +18,13 @@ class SecurityHeaders():
             contents (str): Header contents (value)
         """
         warn = 1
-        
+
         if header == 'x-frame-options':
             if contents.lower() in ['deny', 'sameorigin']:
                 warn = 0
             else:
                 warn = 1
-    
+
         if header == 'strict-transport-security':
             warn = 0
 
@@ -119,7 +119,7 @@ class SecurityHeaders():
         """ Follow redirect """
         if (res.status >= 300 and res.status < 400  and follow_redirects > 0):
             for header in headers:
-                if (header[0] == 'location'):
+                if (header[0].lower() == 'location'):
                     return self.test_http_to_https(header[1], follow_redirects - 1) 
 
         return False
@@ -194,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-redirects', dest='max_redirects', metavar='N', default=2, type=int, help='Max redirects, set 0 to disable')
     args = parser.parse_args()
     url = args.url
+
 
     redirects = args.max_redirects
 
