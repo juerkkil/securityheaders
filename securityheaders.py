@@ -3,6 +3,7 @@ import argparse
 import socket 
 import ssl
 import sys
+import re
 
 from urlparse import urlparse
 
@@ -174,7 +175,10 @@ class SecurityHeaders():
         if (res.status >= 300 and res.status < 400  and follow_redirects > 0):
             for header in headers:
                 if (header[0] == 'location'):
-                    return self.check_headers(header[1], follow_redirects - 1) 
+                    redirect_url = header[1]
+                    if not re.match('^https?://', redirect_url):
+                        redirect_url = protocol + '://' + hostname + redirect_url
+                    return self.check_headers(redirect_url, follow_redirects - 1) 
                 
         """ Loop through headers and evaluate the risk """
         for header in headers:
@@ -203,6 +207,7 @@ if __name__ == "__main__":
     headers = foo.check_headers(url, redirects)
 
     if not headers:
+        print "Failed to fetch headers, exiting..."
         sys.exit(1)
 
     okColor = '\033[92m'
