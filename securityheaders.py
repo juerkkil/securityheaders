@@ -71,7 +71,7 @@ class SecurityHeaders():
         path = parsed[2]
         sslerror = False
             
-        conn = http.client.HTTPSConnection(hostname)
+        conn = http.client.HTTPSConnection(hostname, context = ssl.create_default_context() )
         try:
             conn.request('GET', '/')
             res = conn.getresponse()
@@ -84,7 +84,7 @@ class SecurityHeaders():
 
         # if tls connection fails for unexcepted error, retry without verifying cert
         if sslerror:
-            conn = http.client.HTTPSConnection(hostname, timeout=5, context = ssl._create_unverified_context() )
+            conn = http.client.HTTPSConnection(hostname, timeout=5, context = ssl._create_stdlib_context() )
             try:
                 conn.request('GET', '/')
                 res = conn.getresponse()
@@ -155,7 +155,8 @@ class SecurityHeaders():
         elif (protocol == 'https'):
                 # on error, retry without verifying cert
                 # in this context, we're not really interested in cert validity
-                conn = http.client.HTTPSConnection(hostname, context = ssl._create_unverified_context() )
+                ctx = ssl._create_stdlib_context()
+                conn = http.client.HTTPSConnection(hostname, context = ctx )
         else:
             """ Unknown protocol scheme """
             return {}
@@ -172,7 +173,7 @@ class SecurityHeaders():
         """ Follow redirect """
         if (res.status >= 300 and res.status < 400  and follow_redirects > 0):
             for header in headers:
-                if (header[0] == 'location'):
+                if (header[0].lower() == 'location'):
                     redirect_url = header[1]
                     if not re.match('^https?://', redirect_url):
                         redirect_url = protocol + '://' + hostname + redirect_url
@@ -180,12 +181,11 @@ class SecurityHeaders():
                 
         """ Loop through headers and evaluate the risk """
         for header in headers:
-            
+
             #set to lowercase before the check
             headerAct = header[0].lower()
-            
-            if (headerAct in retval):
 
+            if (headerAct in retval):
                 retval[headerAct] = self.evaluate_warn(headerAct, header[1])
 
         return retval
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     headers = foo.check_headers(url, redirects)
 
     if not headers:
-        print "Failed to fetch headers, exiting..."
+        print ("Failed to fetch headers, exiting...")
         sys.exit(1)
 
     okColor = '\033[92m'
