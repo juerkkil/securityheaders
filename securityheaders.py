@@ -22,6 +22,7 @@ class SecurityHeaders():
         self.hostname = parsed.netloc
         self.path = parsed.path
         self.max_redirects = max_redirects
+        self.headers = None
 
     def _evaluate_header_warning(self, header, contents):
         """ Risk evaluation function.
@@ -104,7 +105,7 @@ class SecurityHeaders():
 
     def _follow_redirect_until_response(self, url, follow_redirects=5):
         temp_url = urlparse(url)
-        while follow_redirects > 0:
+        while follow_redirects >= 0:
             sslerror = False
             if not temp_url.netloc:
                 raise Exception("Invalid redirect URL")
@@ -123,12 +124,12 @@ class SecurityHeaders():
                 if temp_url.scheme == 'https':
                     sslerror = False
             except socket.gaierror:
-                # HTTP(S) connection failed
                 return None
             except ssl.CertificateError:
                 sslerror = True
             except:  # noqa: E722
                 if temp_url.scheme == 'https':
+                    # Possibly some random SSL error
                     sslerror = True
                 else:
                     return None
@@ -164,16 +165,38 @@ class SecurityHeaders():
 
         return False
 
-    def check_headers(self):
+    def fetch_headers(self):
         """ Make the HTTP request and check if any of the pre-defined
         headers exists.
         """
         initial_url = "{}://{}{}".format(self.protocol_scheme, self.hostname, self.path)
+        target_url = None
         if self.max_redirects:
             target_url = self._follow_redirect_until_response(initial_url, self.max_redirects)
-        else:
+
+        if not target_url:
+            # If redirects lead to failing URL, fall back to the initial url
             target_url = urlparse(initial_url)
 
+        if target_url.scheme == 'http':
+            conn = http.client.HTTPConnection(target_url.hostname)
+        elif target_url.scheme == 'https':
+            # Don't verify certs here - we're interested in headers, HTTPS is checked separately
+            ctx = ssl._create_stdlib_context()
+            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx)
+        else:
+            raise Exception("Unknown protocol scheme")
+
+        try:
+            conn.request('HEAD', target_url.path)
+            res = conn.getresponse()
+        except socket.gaierror:
+            raise Exception("Connection failed")
+
+        headers = res.getheaders()
+        self.headers = {x[0].lower(): x[1] for x in headers}
+
+    def check_headers(self):
         """ Default return array """
         retval = {
             'x-frame-options': {'defined': False, 'warn': True, 'contents': ''},
@@ -186,29 +209,12 @@ class SecurityHeaders():
             'server': {'defined': False, 'warn': False, 'contents': ''},
         }
 
-        if target_url.scheme == 'http':
-            conn = http.client.HTTPConnection(target_url.hostname)
-        elif target_url.scheme == 'https':
-            # on error, retry without verifying cert
-            # in this context, we're not really interested in cert validity
-            ctx = ssl._create_stdlib_context()
-            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx)
-        else:
-            """ Unknown protocol scheme """
-            return {}
-
-        try:
-            conn.request('HEAD', target_url.path)
-            res = conn.getresponse()
-        except socket.gaierror:
-            return False
-
-        headers = res.getheaders()
+        if not self.headers:
+            raise Exception("No headers found")
         """ Loop through headers and evaluate the risk """
-        for header in headers:
-            header_act = header[0].lower()
-            if (header_act in retval):
-                retval[header_act] = self._evaluate_header_warning(header_act, header[1])
+        for header in retval:
+            if header in self.headers:
+                retval[header] = self._evaluate_header_warning(header, self.headers[header])
 
         return retval
 
@@ -221,7 +227,7 @@ if __name__ == "__main__":
                         help='Max redirects, set 0 to disable')
     args = parser.parse_args()
     header_check = SecurityHeaders(args.url, args.max_redirects)
-
+    header_check.fetch_headers()
     headers = header_check.check_headers()
     if not headers:
         print("Failed to fetch headers, exiting...")
