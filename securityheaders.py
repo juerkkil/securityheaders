@@ -1,17 +1,29 @@
 import argparse
 import http.client
-import re
 import socket
 import ssl
 import sys
 from urllib.parse import urlparse
 
+DEFAULT_URL_SCHEME = 'https'
+
 
 class SecurityHeaders():
-    def __init__(self):
-        pass
 
-    def evaluate_warn(self, header, contents):
+    def __init__(self, url, max_redirects=2):
+        parsed = urlparse(url)
+        if not parsed.scheme and not parsed.netloc:
+            url = "{}://{}".format(DEFAULT_URL_SCHEME, url)
+            parsed = urlparse(url)
+            if not parsed.scheme and not parsed.netloc:
+                raise Exception("Incorrect URL")
+
+        self.protocol_scheme = parsed.scheme
+        self.hostname = parsed.netloc
+        self.path = parsed.path
+        self.max_redirects = max_redirects
+
+    def _evaluate_header_warning(self, header, contents):
         """ Risk evaluation function.
         Set header warning flag (1/0) according to its contents.
         Args:
@@ -64,12 +76,10 @@ class SecurityHeaders():
 
         return {'defined': True, 'warn': warn, 'contents': contents}
 
-    def test_https(self, url):
-        parsed = urlparse(url)
-        hostname = parsed[1]
+    def test_https(self):
         sslerror = False
 
-        conn = http.client.HTTPSConnection(hostname, context=ssl.create_default_context())
+        conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context())
         try:
             conn.request('GET', '/')
             conn.getresponse()
@@ -82,7 +92,7 @@ class SecurityHeaders():
 
         # if tls connection fails for unexcepted error, retry without verifying cert
         if sslerror:
-            conn = http.client.HTTPSConnection(hostname, timeout=5, context=ssl._create_stdlib_context())
+            conn = http.client.HTTPSConnection(self.hostname, timeout=5, context=ssl._create_stdlib_context())
             try:
                 conn.request('GET', '/')
                 conn.getresponse()
@@ -92,95 +102,113 @@ class SecurityHeaders():
 
         return {'supported': True, 'certvalid': True}
 
-    def test_http_to_https(self, url, follow_redirects=5):
-        parsed = urlparse(url)
-        protocol = parsed[0]
-        hostname = parsed[1]
-        path = parsed[2]
-        if not protocol:
-            protocol = 'http'  # default to http if protocl scheme not specified
+    def _follow_redirect_until_response(self, url, follow_redirects=5):
+        temp_url = urlparse(url)
+        while follow_redirects > 0:
+            sslerror = False
+            if not temp_url.netloc:
+                raise Exception("Invalid redirect URL")
 
-        if protocol == 'https' and follow_redirects != 5:
+            if temp_url.scheme == 'http':
+                conn = http.client.HTTPConnection(temp_url.netloc)
+            elif temp_url.scheme == 'https':
+                ctx = ssl._create_stdlib_context()
+                conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx)
+            else:
+                raise Exception("Unsupported protocol scheme")
+
+            try:
+                conn.request('HEAD', temp_url.path)
+                res = conn.getresponse()
+                if temp_url.scheme == 'https':
+                    sslerror = False
+            except socket.gaierror:
+                # HTTP(S) connection failed
+                return None
+            except ssl.CertificateError:
+                sslerror = True
+            except:  # noqa: E722
+                if temp_url.scheme == 'https':
+                    sslerror = True
+                else:
+                    return None
+
+            # If SSL error, retry without verifying the certificate chain
+            if sslerror:
+                conn = http.client.HTTPSConnection(self.hostname, timeout=5, context=ssl._create_stdlib_context())
+                try:
+                    conn.request('HEAD', temp_url.path)
+                    res = conn.getresponse()
+                except:  # # noqa: E722
+                    # HTTPS Connection failed
+                    return None
+
+            if res.status >= 300 and res.status < 400:
+                headers = res.getheaders()
+                headers_dict = {x[0].lower(): x[1] for x in headers}
+                if 'location' in headers_dict:
+                    temp_url = urlparse(headers_dict['location'])
+            else:
+                return temp_url
+
+            follow_redirects -= 1
+
+        # More than x redirects, stop here
+        return None
+
+    def test_http_to_https(self, follow_redirects=5):
+        url = "http://{}{}".format(self.hostname, self.path)
+        target_url = self._follow_redirect_until_response(url)
+        if target_url and target_url.scheme == 'https':
             return True
-        elif protocol == 'https' and follow_redirects == 5:
-            protocol = 'http'
-
-        if (protocol == 'http'):
-            conn = http.client.HTTPConnection(hostname)
-        try:
-            conn.request('HEAD', path)
-            res = conn.getresponse()
-            headers = res.getheaders()
-        except socket.gaierror:
-            print('HTTP request failed')
-            return False
-
-        """ Follow redirect """
-        if (res.status >= 300 and res.status < 400 and follow_redirects > 0):
-            for header in headers:
-                if (header[0].lower() == 'location'):
-                    return self.test_http_to_https(header[1], follow_redirects - 1)
 
         return False
 
-    def check_headers(self, url, follow_redirects=0):
+    def check_headers(self):
         """ Make the HTTP request and check if any of the pre-defined
         headers exists.
-        Args:
-            url (str): Target URL in format: scheme://hostname/path/to/file
-            follow_redirects (Optional[str]): How deep we follow the redirects,
-            value 0 disables redirects.
         """
+        initial_url = "{}://{}{}".format(self.protocol_scheme, self.hostname, self.path)
+        if self.max_redirects:
+            target_url = self._follow_redirect_until_response(initial_url, self.max_redirects)
+        else:
+            target_url = urlparse(initial_url)
 
         """ Default return array """
         retval = {
-            'x-frame-options': {'defined': False, 'warn': 1, 'contents': ''},
-            'strict-transport-security': {'defined': False, 'warn': 1, 'contents': ''},
-            'access-control-allow-origin': {'defined': False, 'warn': 0, 'contents': ''},
-            'content-security-policy': {'defined': False, 'warn': 1, 'contents': ''},
-            'x-xss-protection': {'defined': False, 'warn': 1, 'contents': ''},
-            'x-content-type-options': {'defined': False, 'warn': 1, 'contents': ''},
-            'x-powered-by': {'defined': False, 'warn': 0, 'contents': ''},
-            'server': {'defined': False, 'warn': 0, 'contents': ''},
+            'x-frame-options': {'defined': False, 'warn': True, 'contents': ''},
+            'strict-transport-security': {'defined': False, 'warn': True, 'contents': ''},
+            'access-control-allow-origin': {'defined': False, 'warn': False, 'contents': ''},
+            'content-security-policy': {'defined': False, 'warn': True, 'contents': ''},
+            'x-xss-protection': {'defined': False, 'warn': True, 'contents': ''},
+            'x-content-type-options': {'defined': False, 'warn': True, 'contents': ''},
+            'x-powered-by': {'defined': False, 'warn': False, 'contents': ''},
+            'server': {'defined': False, 'warn': False, 'contents': ''},
         }
 
-        parsed = urlparse(url)
-        protocol = parsed[0]
-        hostname = parsed[1]
-        path = parsed[2]
-        if (protocol == 'http'):
-            conn = http.client.HTTPConnection(hostname)
-        elif (protocol == 'https'):
+        if target_url.scheme == 'http':
+            conn = http.client.HTTPConnection(target_url.hostname)
+        elif target_url.scheme == 'https':
             # on error, retry without verifying cert
             # in this context, we're not really interested in cert validity
             ctx = ssl._create_stdlib_context()
-            conn = http.client.HTTPSConnection(hostname, context=ctx)
+            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx)
         else:
             """ Unknown protocol scheme """
             return {}
 
         try:
-            conn.request('HEAD', path)
+            conn.request('HEAD', target_url.path)
             res = conn.getresponse()
-            headers = res.getheaders()
         except socket.gaierror:
-            print('HTTP request failed')
             return False
 
-        """ Follow redirect """
-        if (res.status >= 300 and res.status < 400 and follow_redirects > 0):
-            for header in headers:
-                if (header[0].lower() == 'location'):
-                    redirect_url = header[1]
-                    if not re.match('^https?://', redirect_url):
-                        redirect_url = protocol + '://' + hostname + redirect_url
-                    return self.check_headers(redirect_url, follow_redirects - 1)
-
+        headers = res.getheaders()
         """ Loop through headers and evaluate the risk """
         for header in headers:
             header_act = header[0].lower()
             if (header_act in retval):
-                retval[header_act] = self.evaluate_warn(header_act, header[1])
+                retval[header_act] = self._evaluate_header_warning(header_act, header[1])
 
         return retval
 
@@ -192,16 +220,9 @@ if __name__ == "__main__":
     parser.add_argument('--max-redirects', dest='max_redirects', metavar='N', default=2, type=int,
                         help='Max redirects, set 0 to disable')
     args = parser.parse_args()
-    url = args.url
+    header_check = SecurityHeaders(args.url, args.max_redirects)
 
-    redirects = args.max_redirects
-    header_check = SecurityHeaders()
-
-    parsed = urlparse(url)
-    if not parsed.scheme:
-        url = 'http://' + url  # default to http if scheme not provided
-
-    headers = header_check.check_headers(url, redirects)
+    headers = header_check.check_headers()
     if not headers:
         print("Failed to fetch headers, exiting...")
         sys.exit(1)
@@ -214,18 +235,18 @@ if __name__ == "__main__":
             if not value['defined']:
                 print("Header '{}' is missing ... [ {}WARN{} ]".format(header, warn_color, end_color))
             else:
-                print("Header '{}' contains value '{}... [ {}WARN{} ]".format(
+                print("Header '{}' contains value '{}'... [ {}WARN{} ]".format(
                     header, value['contents'], warn_color, end_color,
                 ))
         else:
             if not value['defined']:
                 print("Header '{}' is missing ... [ {}OK{} ]".format(header, ok_color, end_color))
             else:
-                print("Header '{}' contains value '{}... [ {}OK{} ]".format(
+                print("Header '{}' contains value '{}'... [ {}OK{} ]".format(
                     header, value['contents'], ok_color, end_color,
                 ))
 
-    https = header_check.test_https(url)
+    https = header_check.test_https()
     if https['supported']:
         print("HTTPS supported ... [ {}OK{} ]".format(ok_color, end_color))
     else:
@@ -236,7 +257,7 @@ if __name__ == "__main__":
     else:
         print("HTTPS valid certificate ... [ {}FAIL{} ]".format(warn_color, end_color))
 
-    if header_check.test_http_to_https(url, 5):
+    if header_check.test_http_to_https():
         print("HTTP -> HTTPS redirect ... [ {}OK{} ]".format(ok_color, end_color))
     else:
         print("HTTP -> HTTPS redirect ... [ {}FAIL{} ]".format(warn_color, end_color))
