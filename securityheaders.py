@@ -5,10 +5,50 @@ import ssl
 import sys
 from urllib.parse import urlparse
 
-DEFAULT_URL_SCHEME = 'https'
+import utils
+from constants import EVAL_WARN, DEFAULT_URL_SCHEME
 
 
 class SecurityHeaders():
+    HEADERS_DICT = {
+        'x-frame-options': {
+            'recommended': True,
+            'eval_func': utils.eval_x_frame_options,
+        },
+        'strict-transport-security': {
+            'recommended': True,
+            'eval_func': utils.eval_sts,
+        },
+        'content-security-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_csp,
+        },
+        'server': {
+            'recommended': False,
+            'eval_func': utils.eval_version_info,
+        },
+        'x-powered-by': {
+            'recommended': False,
+            'eval_func': utils.eval_version_info,
+        },
+        'x-content-type-options': {
+            'recommended': True,
+            'eval_func': utils.eval_content_type_options,
+        },
+        'x-xss-protection': {
+            # X-XSS-Protection is deprecated; not supported anymore, and may be even dangerous in older browsers
+            'recommended': False,
+            'eval_func': utils.eval_x_xss_protection,
+        },
+        'referrer-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_referrer_policy,
+        },
+        'permissions-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_permissions_policy,
+        }
+    }
 
     def __init__(self, url, max_redirects=2):
         parsed = urlparse(url)
@@ -16,66 +56,13 @@ class SecurityHeaders():
             url = "{}://{}".format(DEFAULT_URL_SCHEME, url)
             parsed = urlparse(url)
             if not parsed.scheme and not parsed.netloc:
-                raise Exception("Incorrect URL")
+                raise Exception("Invalid URL")
 
         self.protocol_scheme = parsed.scheme
         self.hostname = parsed.netloc
         self.path = parsed.path
         self.max_redirects = max_redirects
         self.headers = None
-
-    def _evaluate_header_warning(self, header, contents):
-        """ Risk evaluation function.
-        Set header warning flag (1/0) according to its contents.
-        Args:
-            header (str): HTTP header name in lower-case
-            contents (str): Header contents (value)
-        """
-        warn = True
-
-        if header == 'x-frame-options':
-            if contents.lower() in ['deny', 'sameorigin']:
-                warn = False
-            else:
-                warn = True
-
-        if header == 'strict-transport-security':
-            warn = False
-
-        """ Evaluating the warn of CSP contents may be a bit more tricky.
-            For now, just disable the warn if the header is defined
-            """
-        if header == 'content-security-policy':
-            warn = False
-
-        """ Raise the warn flag, if cross domain requests are allowed from any
-            origin """
-        if header == 'access-control-allow-origin':
-            if contents == '*':
-                warn = True
-            else:
-                warn = False
-
-        if header.lower() == 'x-xss-protection':
-            if contents.lower() in ['1', '1; mode=block']:
-                warn = False
-            else:
-                warn = True
-
-        if header == 'x-content-type-options':
-            if contents.lower() == 'nosniff':
-                warn = False
-            else:
-                warn = True
-
-        """ Enable warning if backend version information is disclosed """
-        if header == 'x-powered-by' or header == 'server':
-            if len(contents) > 1:
-                warn = True
-            else:
-                warn = False
-
-        return {'defined': True, 'warn': warn, 'contents': contents}
 
     def test_https(self):
         sslerror = False
@@ -198,23 +185,21 @@ class SecurityHeaders():
 
     def check_headers(self):
         """ Default return array """
-        retval = {
-            'x-frame-options': {'defined': False, 'warn': True, 'contents': ''},
-            'strict-transport-security': {'defined': False, 'warn': True, 'contents': ''},
-            'access-control-allow-origin': {'defined': False, 'warn': False, 'contents': ''},
-            'content-security-policy': {'defined': False, 'warn': True, 'contents': ''},
-            'x-xss-protection': {'defined': False, 'warn': True, 'contents': ''},
-            'x-content-type-options': {'defined': False, 'warn': True, 'contents': ''},
-            'x-powered-by': {'defined': False, 'warn': False, 'contents': ''},
-            'server': {'defined': False, 'warn': False, 'contents': ''},
-        }
+        retval = {}
 
         if not self.headers:
             raise Exception("No headers found")
         """ Loop through headers and evaluate the risk """
-        for header in retval:
+        for header in self.HEADERS_DICT:
             if header in self.headers:
-                retval[header] = self._evaluate_header_warning(header, self.headers[header])
+                eval_func = self.HEADERS_DICT[header].get('eval_func')
+                if not eval_func:
+                    raise Exception("No evaluation function found for header: {}".format(header))
+                warn = eval_func(self.headers[header]) == EVAL_WARN
+                retval[header] = {'defined': True, 'warn': warn, 'contents': self.headers[header]}
+            else:
+                warn = self.HEADERS_DICT[header].get('recommended')
+                retval[header] = {'defined': False, 'warn': warn, 'contents': None}
 
         return retval
 
