@@ -189,11 +189,16 @@ class SecurityHeaders():
                 eval_func = self.HEADERS_DICT[header].get('eval_func')
                 if not eval_func:
                     raise SecurityHeadersException("No evaluation function found for header: {}".format(header))
-                warn = eval_func(self.headers[header]) == EVAL_WARN
-                retval[header] = {'defined': True, 'warn': warn, 'contents': self.headers[header]}
+                res, notes = eval_func(self.headers[header])
+                retval[header] = {
+                    'defined': True,
+                    'warn': res == EVAL_WARN,
+                    'contents': self.headers[header],
+                    'notes': notes}
+
             else:
                 warn = self.HEADERS_DICT[header].get('recommended')
-                retval[header] = {'defined': False, 'warn': warn, 'contents': None}
+                retval[header] = {'defined': False, 'warn': warn, 'contents': None, 'notes': []}
 
         return retval
 
@@ -225,6 +230,8 @@ if __name__ == "__main__":
                 print("Header '{}' contains value '{}'... [ {}WARN{} ]".format(
                     header, value['contents'], warn_color, end_color,
                 ))
+                for n in value['notes']:
+                    print(" * {}".format(n))
         else:
             if not value['defined']:
                 print("Header '{}' is missing ... [ {}OK{} ]".format(header, ok_color, end_color))
