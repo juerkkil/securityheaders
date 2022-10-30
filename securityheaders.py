@@ -7,7 +7,7 @@ import sys
 from urllib.parse import urlparse
 
 import utils
-from constants import EVAL_WARN, DEFAULT_URL_SCHEME
+from constants import DEFAULT_URL_SCHEME, EVAL_WARN
 
 
 class SecurityHeadersException(Exception):
