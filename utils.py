@@ -50,12 +50,7 @@ def eval_csp(contents: str) -> Tuple[int, list]:
     csp_unsafe = False
     csp_notes = []
 
-    csp_parsed = {}
-    directives = contents.split(";")
-    for directive in directives:
-        directive = directive.strip().split()
-        if directive:
-            csp_parsed[directive[0]] = directive[1:] if len(directive) > 1 else []
+    csp_parsed = csp_parser(contents)
 
     for rule in UNSAFE_RULES:
         if rule not in csp_parsed:
@@ -90,7 +85,22 @@ def eval_version_info(contents: str) -> Tuple[int, list]:
 
 
 def eval_permissions_policy(contents: str) -> Tuple[int, list]:
-    # TODO! Evaluate Permission-Policy and ensure it's somewhat reasonable
+    # Configuring Permission-Policy is very case-specific and it's difficult to define a particular recommendation.
+    # We apply here a logic, that access to privacy-sensitive features and payments API should be restricted.
+
+    pp_parsed = permissions_policy_parser(contents)
+    notes = []
+    pp_unsafe = False
+    RESTRICTED_PRIVACY_POLICY_FEATURES = ['camera', 'geolocation', 'microphone', 'payment']
+
+    for feature in RESTRICTED_PRIVACY_POLICY_FEATURES:
+        if feature not in pp_parsed or '*' in pp_parsed.get(feature):
+            pp_unsafe = True
+            notes.append("Privacy-sensitive feature '{}' is not restricted to specific origins.".format(feature))
+
+    if pp_unsafe:
+        return EVAL_WARN, notes
+
     return EVAL_OK, []
 
 
@@ -107,3 +117,27 @@ def eval_referrer_policy(contents: str) -> Tuple[int, list]:
         return EVAL_OK, []
 
     return EVAL_WARN, ["Unsafe contents: {}".format(contents)]
+
+
+def csp_parser(contents: str) -> dict:
+    csp = {}
+    directives = contents.split(";")
+    for directive in directives:
+        directive = directive.strip().split()
+        if directive:
+            csp[directive[0]] = directive[1:] if len(directive) > 1 else []
+
+    return csp
+
+
+def permissions_policy_parser(contents: str) -> dict:
+    policies = contents.split(",")
+    retval = {}
+    for policy in policies:
+        match = re.match('^(\\w*)=(\\(([^\\)]*)\\)|\\*|self)$', policy)
+        if match:
+            feature = match.groups()[0]
+            feature_policy = match.groups()[2] if match.groups()[2] is not None else match.groups()[1]
+            retval[feature] = feature_policy.split()
+
+    return retval
