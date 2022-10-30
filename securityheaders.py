@@ -1,5 +1,6 @@
 import argparse
 import http.client
+import re
 import socket
 import ssl
 import sys
@@ -128,7 +129,10 @@ class SecurityHeaders():
                 headers = res.getheaders()
                 headers_dict = {x[0].lower(): x[1] for x in headers}
                 if 'location' in headers_dict:
-                    temp_url = urlparse(headers_dict['location'])
+                    if re.match("^https?://", headers_dict['location']):
+                        temp_url = urlparse(headers_dict['location'])
+                    else:  # Probably relative path
+                        temp_url = temp_url._replace(path=headers_dict['location'])
             else:
                 return temp_url
 
