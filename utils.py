@@ -141,3 +141,15 @@ def permissions_policy_parser(contents: str) -> dict:
             retval[feature] = feature_policy.split()
 
     return retval
+
+
+def print_ok(msg: str):
+    OK_COLOR = '\033[92m'
+    END_COLOR = '\033[0m'
+    print("{} ... [ {}OK{} ]".format(msg, OK_COLOR, END_COLOR))
+
+
+def print_warning(msg: str):
+    WARN_COLOR = '\033[93m'
+    END_COLOR = '\033[0m'
+    print("{} ... [ {}WARN{} ]".format(msg, WARN_COLOR, END_COLOR))

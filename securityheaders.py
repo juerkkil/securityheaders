@@ -23,6 +23,8 @@ class UnableToConnect(SecurityHeadersException):
 
 
 class SecurityHeaders():
+    DEFAULT_TIMEOUT = 10
+
     # Let's try to imitate a legit browser to avoid being blocked / flagged as web crawler
     REQUEST_HEADERS = {
         'Accept': ('text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,'
@@ -34,7 +36,7 @@ class SecurityHeaders():
                        'Chrome/106.0.0.0 Safari/537.36'),
     }
 
-    HEADERS_DICT = {
+    SECURITY_HEADERS_DICT = {
         'x-frame-options': {
             'recommended': True,
             'eval_func': utils.eval_x_frame_options,
@@ -46,14 +48,6 @@ class SecurityHeaders():
         'content-security-policy': {
             'recommended': True,
             'eval_func': utils.eval_csp,
-        },
-        'server': {
-            'recommended': False,
-            'eval_func': utils.eval_version_info,
-        },
-        'x-powered-by': {
-            'recommended': False,
-            'eval_func': utils.eval_version_info,
         },
         'x-content-type-options': {
             'recommended': True,
@@ -74,6 +68,12 @@ class SecurityHeaders():
         }
     }
 
+    SERVER_VERSION_HEADERS = [
+        'x-powered-by',
+        'server',
+        'x-aspnet-version',
+    ]
+
     def __init__(self, url, max_redirects=2, no_check_certificate=False):
         parsed = urlparse(url)
         if not parsed.scheme and not parsed.netloc:
@@ -86,11 +86,18 @@ class SecurityHeaders():
         self.hostname = parsed.netloc
         self.path = parsed.path
         self.max_redirects = max_redirects
+        self.target_url = None
         self.verify_ssl = False if no_check_certificate else True
         self.headers = None
 
+        if self.max_redirects:
+            self.target_url = self._follow_redirect_until_response(url, self.max_redirects)
+        else:
+            self.target_url = parsed
+
     def test_https(self):
-        conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context(), timeout=10)
+        conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context(),
+                                           timeout=self.DEFAULT_TIMEOUT)
         try:
             conn.request('GET', '/')
         except (socket.gaierror, socket.timeout, ConnectionRefusedError):
@@ -107,13 +114,13 @@ class SecurityHeaders():
                 raise InvalidTargetURL("Invalid redirect URL")
 
             if temp_url.scheme == 'http':
-                conn = http.client.HTTPConnection(temp_url.netloc, timeout=10)
+                conn = http.client.HTTPConnection(temp_url.netloc, timeout=self.DEFAULT_TIMEOUT)
             elif temp_url.scheme == 'https':
                 if self.verify_ssl:
                     ctx = ssl.create_default_context()
                 else:
                     ctx = ssl._create_stdlib_context()
-                conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=10)
+                conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=self.DEFAULT_TIMEOUT)
             else:
                 raise InvalidTargetURL("Unsupported protocol scheme")
 
@@ -149,33 +156,29 @@ class SecurityHeaders():
 
         return False
 
-    def fetch_headers(self):
-        """ Fetch headers from the target site and store them into the class instance """
-        initial_url = "{}://{}{}".format(self.protocol_scheme, self.hostname, self.path)
-        target_url = None
-        if self.max_redirects:
-            target_url = self._follow_redirect_until_response(initial_url, self.max_redirects)
-
-        if not target_url:
-            # If redirects lead to failing URL, fall back to the initial url
-            target_url = urlparse(initial_url)
-
+    def open_connection(self, target_url):
         if target_url.scheme == 'http':
-            conn = http.client.HTTPConnection(target_url.hostname, timeout=10)
+            conn = http.client.HTTPConnection(target_url.hostname, timeout=self.DEFAULT_TIMEOUT)
         elif target_url.scheme == 'https':
             if self.verify_ssl:
                 ctx = ssl.create_default_context()
             else:
                 ctx = ssl._create_stdlib_context()
-            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx, timeout=10)
+            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx, timeout=self.DEFAULT_TIMEOUT)
         else:
             raise InvalidTargetURL("Unsupported protocol scheme")
 
+        return conn
+
+    def fetch_headers(self):
+        """ Fetch headers from the target site and store them into the class instance """
+
+        conn = self.open_connection(self.target_url)
         try:
-            conn.request('GET', target_url.path, headers=self.REQUEST_HEADERS)
+            conn.request('GET', self.target_url.path, headers=self.REQUEST_HEADERS)
             res = conn.getresponse()
         except (socket.gaierror, socket.timeout, ConnectionRefusedError, ssl.SSLError) as e:
-            raise UnableToConnect("Connection failed {}".format(target_url.hostname)) from e
+            raise UnableToConnect("Connection failed {}".format(self.target_url.hostname)) from e
 
         headers = res.getheaders()
         self.headers = {x[0].lower(): x[1] for x in headers}
@@ -188,9 +191,9 @@ class SecurityHeaders():
             raise SecurityHeadersException("Headers not fetched successfully")
 
         """ Loop through headers and evaluate the risk """
-        for header in self.HEADERS_DICT:
+        for header in self.SECURITY_HEADERS_DICT:
             if header in self.headers:
-                eval_func = self.HEADERS_DICT[header].get('eval_func')
+                eval_func = self.SECURITY_HEADERS_DICT[header].get('eval_func')
                 if not eval_func:
                     raise SecurityHeadersException("No evaluation function found for header: {}".format(header))
                 res, notes = eval_func(self.headers[header])
@@ -198,11 +201,22 @@ class SecurityHeaders():
                     'defined': True,
                     'warn': res == EVAL_WARN,
                     'contents': self.headers[header],
-                    'notes': notes}
+                    'notes': notes,
+                }
 
             else:
-                warn = self.HEADERS_DICT[header].get('recommended')
+                warn = self.SECURITY_HEADERS_DICT[header].get('recommended')
                 retval[header] = {'defined': False, 'warn': warn, 'contents': None, 'notes': []}
+
+        for header in self.SERVER_VERSION_HEADERS:
+            if header in self.headers:
+                res, notes = utils.eval_version_info(self.headers[header])
+                retval[header] = {
+                    'defined': True,
+                    'warn': res == EVAL_WARN,
+                    'contents': self.headers[header],
+                    'notes': notes,
+                }
 
         return retval
 
@@ -216,46 +230,44 @@ if __name__ == "__main__":
     parser.add_argument('--no-check-certificate', dest='no_check_certificate', action='store_true',
                         help='Do not verify TLS certificate chain')
     args = parser.parse_args()
-    header_check = SecurityHeaders(args.url, args.max_redirects, args.no_check_certificate)
-    header_check.fetch_headers()
-    headers = header_check.check_headers()
+    try:
+        header_check = SecurityHeaders(args.url, args.max_redirects, args.no_check_certificate)
+        header_check.fetch_headers()
+        headers = header_check.check_headers()
+    except SecurityHeadersException as e:
+        print(e)
+        sys.exit(1)
+
     if not headers:
         print("Failed to fetch headers, exiting...")
         sys.exit(1)
 
-    ok_color = '\033[92m'
-    warn_color = '\033[93m'
-    end_color = '\033[0m'
     for header, value in headers.items():
         if value['warn']:
             if not value['defined']:
-                print("Header '{}' is missing ... [ {}WARN{} ]".format(header, warn_color, end_color))
+                utils.print_warning("Header '{}' is missing".format(header))
             else:
-                print("Header '{}' contains value '{}'... [ {}WARN{} ]".format(
-                    header, value['contents'], warn_color, end_color,
-                ))
+                utils.print_warning("Header '{}' contains value '{}".format(header, value['contents']))
                 for n in value['notes']:
                     print(" * {}".format(n))
         else:
             if not value['defined']:
-                print("Header '{}' is missing ... [ {}OK{} ]".format(header, ok_color, end_color))
+                utils.print_ok("Header '{}' is missing".format(header))
             else:
-                print("Header '{}' contains value '{}'... [ {}OK{} ]".format(
-                    header, value['contents'], ok_color, end_color,
-                ))
+                utils.print_ok("Header '{}' contains value".format(header))
 
     https = header_check.test_https()
     if https['supported']:
-        print("HTTPS supported ... [ {}OK{} ]".format(ok_color, end_color))
+        utils.print_ok("HTTPS supported")
     else:
-        print("HTTPS supported ... [ {}FAIL{} ]".format(warn_color, end_color))
+        utils.print_warning("HTTPS supported")
 
     if https['certvalid']:
-        print("HTTPS valid certificate ... [ {}OK{} ]".format(ok_color, end_color))
+        utils.print_ok("HTTPS valid certificate")
     else:
-        print("HTTPS valid certificate ... [ {}FAIL{} ]".format(warn_color, end_color))
+        utils.print_warning("HTTPS valid certificate")
 
     if header_check.test_http_to_https():
-        print("HTTP -> HTTPS redirect ... [ {}OK{} ]".format(ok_color, end_color))
+        utils.print_ok("HTTP -> HTTPS redirect")
     else:
-        print("HTTP -> HTTPS redirect ... [ {}FAIL{} ]".format(warn_color, end_color))
+        utils.print_warning("HTTP -> HTTPS redirect")
