@@ -94,10 +94,13 @@ def eval_permissions_policy(contents: str) -> Tuple[int, list]:
     RESTRICTED_PRIVACY_POLICY_FEATURES = ['camera', 'geolocation', 'microphone', 'payment']
 
     for feature in RESTRICTED_PRIVACY_POLICY_FEATURES:
-        if feature not in pp_parsed or '*' in pp_parsed.get(feature):
+        feat_policy = pp_parsed.get(feature)
+        if feat_policy is None:
             pp_unsafe = True
-            notes.append("Privacy-sensitive feature '{}' is not restricted to specific origins.".format(feature))
-
+            notes.append("Privacy-sensitive feature '{}' not defined in permission-policy, always allowed.".format(feature))
+        elif '*' in feat_policy:
+            pp_unsafe = True
+            notes.append("Privacy-sensitive feature '{}' allowed from unsafe origin '*'".format(feature))
     if pp_unsafe:
         return EVAL_WARN, notes
 
@@ -134,7 +137,7 @@ def permissions_policy_parser(contents: str) -> dict:
     policies = contents.split(",")
     retval = {}
     for policy in policies:
-        match = re.match('^(\\w*)=(\\(([^\\)]*)\\)|\\*|self)$', policy)
+        match = re.match('^(\\w+(?:-\\w+)*)=(\\(([^\\)]*)\\)|\\*|self);?$', policy.strip())
         if match:
             feature = match.groups()[0]
             feature_policy = match.groups()[2] if match.groups()[2] is not None else match.groups()[1]
