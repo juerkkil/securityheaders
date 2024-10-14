@@ -4,7 +4,7 @@ import re
 import socket
 import ssl
 import sys
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 import utils
 from constants import DEFAULT_URL_SCHEME, EVAL_WARN
@@ -85,15 +85,9 @@ class SecurityHeaders():
         self.protocol_scheme = parsed.scheme
         self.hostname = parsed.netloc
         self.path = parsed.path
-        self.max_redirects = max_redirects
-        self.target_url = None
         self.verify_ssl = False if no_check_certificate else True
+        self.target_url: ParseResult = self._follow_redirect_until_response(url, max_redirects) if max_redirects > 0 else parsed
         self.headers = None
-
-        if self.max_redirects:
-            self.target_url = self._follow_redirect_until_response(url, self.max_redirects)
-        else:
-            self.target_url = parsed
 
     def test_https(self):
         conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context(),
@@ -110,16 +104,11 @@ class SecurityHeaders():
     def _follow_redirect_until_response(self, url, follow_redirects=5):
         temp_url = urlparse(url)
         while follow_redirects >= 0:
-            if not temp_url.netloc:
-                raise InvalidTargetURL("Invalid redirect URL")
 
             if temp_url.scheme == 'http':
                 conn = http.client.HTTPConnection(temp_url.netloc, timeout=self.DEFAULT_TIMEOUT)
             elif temp_url.scheme == 'https':
-                if self.verify_ssl:
-                    ctx = ssl.create_default_context()
-                else:
-                    ctx = ssl._create_stdlib_context()
+                ctx = ssl.create_default_context() if self.verify_ssl else ssl._create_stdlib_context()
                 conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=self.DEFAULT_TIMEOUT)
             else:
                 raise InvalidTargetURL("Unsupported protocol scheme")
@@ -146,7 +135,7 @@ class SecurityHeaders():
             follow_redirects -= 1
 
         # More than x redirects, stop here
-        return None
+        return temp_url
 
     def test_http_to_https(self, follow_redirects=5):
         url = "http://{}{}".format(self.hostname, self.path)
@@ -254,7 +243,7 @@ if __name__ == "__main__":
             if not value['defined']:
                 utils.print_ok("Header '{}' is missing".format(header))
             else:
-                utils.print_ok("Header '{}' contains value".format(header))
+                utils.print_ok("Header '{}' contains a proper value".format(header))
 
     https = header_check.test_https()
     if https['supported']:
