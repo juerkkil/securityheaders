@@ -7,7 +7,7 @@ import sys
 from urllib.parse import ParseResult, urlparse
 
 import utils
-from constants import DEFAULT_URL_SCHEME, EVAL_WARN
+from constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN
 
 
 class SecurityHeadersException(Exception):
@@ -23,8 +23,6 @@ class UnableToConnect(SecurityHeadersException):
 
 
 class SecurityHeaders():
-    DEFAULT_TIMEOUT = 10
-
     # Let's try to imitate a legit browser to avoid being blocked / flagged as web crawler
     REQUEST_HEADERS = {
         'Accept': ('text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,'
@@ -74,6 +72,10 @@ class SecurityHeaders():
         'x-aspnet-version',
     ]
 
+    HEADER_STRUCTURED_LIST = [  # Response headers that define multiple values as comma-sparated list
+        'permissions-policy',
+    ]
+
     def __init__(self, url, max_redirects=2, no_check_certificate=False):
         parsed = urlparse(url)
         if not parsed.scheme and not parsed.netloc:
@@ -86,12 +88,13 @@ class SecurityHeaders():
         self.hostname = parsed.netloc
         self.path = parsed.path
         self.verify_ssl = False if no_check_certificate else True
-        self.target_url: ParseResult = self._follow_redirect_until_response(url, max_redirects) if max_redirects > 0 else parsed
-        self.headers = None
+        self.target_url: ParseResult = self._follow_redirect_until_response(url, max_redirects) if max_redirects > 0 \
+            else parsed
+        self.headers = {}
 
     def test_https(self):
         conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context(),
-                                           timeout=self.DEFAULT_TIMEOUT)
+                                           timeout=DEFAULT_TIMEOUT)
         try:
             conn.request('GET', '/')
         except (socket.gaierror, socket.timeout, ConnectionRefusedError):
@@ -106,10 +109,10 @@ class SecurityHeaders():
         while follow_redirects >= 0:
 
             if temp_url.scheme == 'http':
-                conn = http.client.HTTPConnection(temp_url.netloc, timeout=self.DEFAULT_TIMEOUT)
+                conn = http.client.HTTPConnection(temp_url.netloc, timeout=DEFAULT_TIMEOUT)
             elif temp_url.scheme == 'https':
                 ctx = ssl.create_default_context() if self.verify_ssl else ssl._create_stdlib_context()
-                conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=self.DEFAULT_TIMEOUT)
+                conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=DEFAULT_TIMEOUT)
             else:
                 raise InvalidTargetURL("Unsupported protocol scheme")
 
@@ -147,13 +150,13 @@ class SecurityHeaders():
 
     def open_connection(self, target_url):
         if target_url.scheme == 'http':
-            conn = http.client.HTTPConnection(target_url.hostname, timeout=self.DEFAULT_TIMEOUT)
+            conn = http.client.HTTPConnection(target_url.hostname, timeout=DEFAULT_TIMEOUT)
         elif target_url.scheme == 'https':
             if self.verify_ssl:
                 ctx = ssl.create_default_context()
             else:
                 ctx = ssl._create_stdlib_context()
-            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx, timeout=self.DEFAULT_TIMEOUT)
+            conn = http.client.HTTPSConnection(target_url.hostname, context=ctx, timeout=DEFAULT_TIMEOUT)
         else:
             raise InvalidTargetURL("Unsupported protocol scheme")
 
@@ -170,7 +173,13 @@ class SecurityHeaders():
             raise UnableToConnect("Connection failed {}".format(self.target_url.hostname)) from e
 
         headers = res.getheaders()
-        self.headers = {x[0].lower(): x[1] for x in headers}
+        for h in headers:
+            key = h[0].lower()
+            if key in self.HEADER_STRUCTURED_LIST and key in self.headers:
+                # Scenario described in RFC 2616 section 4.2
+                self.headers[key] += ', {}'.format(h[1])
+            else:
+                self.headers[key] = h[1]
 
     def check_headers(self):
         """ Default return array """
