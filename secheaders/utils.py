@@ -2,7 +2,7 @@ import re
 from typing import Tuple
 
 
-from constants import EVAL_WARN, EVAL_OK
+from .constants import EVAL_WARN, EVAL_OK
 
 
 def eval_x_frame_options(contents: str) -> Tuple[int, list]:
@@ -97,7 +97,8 @@ def eval_permissions_policy(contents: str) -> Tuple[int, list]:
         feat_policy = pp_parsed.get(feature)
         if feat_policy is None:
             pp_unsafe = True
-            notes.append("Privacy-sensitive feature '{}' not defined in permission-policy, always allowed.".format(feature))
+            notes.append("Privacy-sensitive feature '{}' not defined in permission-policy, always allowed.".format(
+                feature))
         elif '*' in feat_policy:
             pp_unsafe = True
             notes.append("Privacy-sensitive feature '{}' allowed from unsafe origin '*'".format(feature))

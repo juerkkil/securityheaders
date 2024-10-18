@@ -6,20 +6,9 @@ import ssl
 import sys
 from urllib.parse import ParseResult, urlparse
 
-import utils
-from constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN
-
-
-class SecurityHeadersException(Exception):
-    pass
-
-
-class InvalidTargetURL(SecurityHeadersException):
-    pass
-
-
-class UnableToConnect(SecurityHeadersException):
-    pass
+from . import utils
+from .constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN
+from .exceptions import SecurityHeadersException, InvalidTargetURL, UnableToConnect
 
 
 class SecurityHeaders():
@@ -219,7 +208,7 @@ class SecurityHeaders():
         return retval
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='Check HTTP security headers',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('url', metavar='URL', type=str, help='Target URL')
@@ -269,3 +258,7 @@ if __name__ == "__main__":
         utils.print_ok("HTTP -> HTTPS redirect")
     else:
         utils.print_warning("HTTP -> HTTPS redirect")
+
+
+if __name__ == "__main__":
+    main()
