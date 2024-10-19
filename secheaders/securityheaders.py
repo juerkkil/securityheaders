@@ -8,15 +8,47 @@ from urllib.parse import ParseResult, urlparse
 
 from . import utils
 from .constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN, REQUEST_HEADERS, HEADER_STRUCTURED_LIST, \
-        SECURITY_HEADERS_DICT, SERVER_VERSION_HEADERS
+        SERVER_VERSION_HEADERS
 from .exceptions import SecurityHeadersException, InvalidTargetURL, UnableToConnect
 
 
 class SecurityHeaders():
+    SECURITY_HEADERS_DICT = {
+        'x-frame-options': {
+            'recommended': True,
+            'eval_func': utils.eval_x_frame_options,
+        },
+        'strict-transport-security': {
+            'recommended': True,
+            'eval_func': utils.eval_sts,
+        },
+        'content-security-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_csp,
+        },
+        'x-content-type-options': {
+            'recommended': True,
+            'eval_func': utils.eval_content_type_options,
+        },
+        'x-xss-protection': {
+            # X-XSS-Protection is deprecated; not supported anymore, and may be even dangerous in older browsers
+            'recommended': False,
+            'eval_func': utils.eval_x_xss_protection,
+        },
+        'referrer-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_referrer_policy,
+        },
+        'permissions-policy': {
+            'recommended': True,
+            'eval_func': utils.eval_permissions_policy,
+        }
+    }
+
     def __init__(self, url, max_redirects=2, no_check_certificate=False):
         parsed = urlparse(url)
         if not parsed.scheme and not parsed.netloc:
-            url = "{}://{}".format(DEFAULT_URL_SCHEME, url)
+            url = f"{DEFAULT_URL_SCHEME}://{url}"
             parsed = urlparse(url)
             if not parsed.scheme and not parsed.netloc:
                 raise InvalidTargetURL("Unable to parse the URL")
@@ -24,22 +56,24 @@ class SecurityHeaders():
         self.protocol_scheme = parsed.scheme
         self.hostname = parsed.netloc
         self.path = parsed.path
-        self.verify_ssl = False if no_check_certificate else True
+        self.verify_ssl = not no_check_certificate
         self.target_url: ParseResult = self._follow_redirect_until_response(url, max_redirects) if max_redirects > 0 \
             else parsed
         self.headers = {}
 
     def test_https(self):
+        redirect_supported = self._test_http_to_https()
+
         conn = http.client.HTTPSConnection(self.hostname, context=ssl.create_default_context(),
                                            timeout=DEFAULT_TIMEOUT)
         try:
             conn.request('GET', '/')
         except (socket.gaierror, socket.timeout, ConnectionRefusedError):
-            return {'supported': False, 'certvalid': False}
+            return {'supported': False, 'certvalid': False, 'redirect': redirect_supported}
         except ssl.SSLError:
-            return {'supported': True, 'certvalid': False}
+            return {'supported': True, 'certvalid': False, 'redirect': redirect_supported}
 
-        return {'supported': True, 'certvalid': True}
+        return {'supported': True, 'certvalid': True, 'redirect': redirect_supported}
 
     def _follow_redirect_until_response(self, url, follow_redirects=5):
         temp_url = urlparse(url)
@@ -48,7 +82,7 @@ class SecurityHeaders():
             if temp_url.scheme == 'http':
                 conn = http.client.HTTPConnection(temp_url.netloc, timeout=DEFAULT_TIMEOUT)
             elif temp_url.scheme == 'https':
-                ctx = ssl.create_default_context() if self.verify_ssl else ssl._create_stdlib_context()
+                ctx = ssl.create_default_context() if self.verify_ssl else ssl._create_stdlib_context()  # pylint: disable=protected-access
                 conn = http.client.HTTPSConnection(temp_url.netloc, context=ctx, timeout=DEFAULT_TIMEOUT)
             else:
                 raise InvalidTargetURL("Unsupported protocol scheme")
@@ -57,7 +91,7 @@ class SecurityHeaders():
                 conn.request('GET', temp_url.path, headers=REQUEST_HEADERS)
                 res = conn.getresponse()
             except (socket.gaierror, socket.timeout, ConnectionRefusedError) as e:
-                raise UnableToConnect("Connection failed {}".format(temp_url.netloc)) from e
+                raise UnableToConnect(f"Connection failed {temp_url.netloc}") from e
             except ssl.SSLError as e:
                 raise UnableToConnect("SSL Error") from e
 
@@ -77,9 +111,9 @@ class SecurityHeaders():
         # More than x redirects, stop here
         return temp_url
 
-    def test_http_to_https(self, follow_redirects=5):
-        url = "http://{}{}".format(self.hostname, self.path)
-        target_url = self._follow_redirect_until_response(url)
+    def _test_http_to_https(self, follow_redirects=5):
+        url = f"http://{self.hostname}{self.path}"
+        target_url = self._follow_redirect_until_response(url, follow_redirects)
         if target_url and target_url.scheme == 'https':
             return True
 
@@ -92,7 +126,7 @@ class SecurityHeaders():
             if self.verify_ssl:
                 ctx = ssl.create_default_context()
             else:
-                ctx = ssl._create_stdlib_context()
+                ctx = ssl._create_stdlib_context()  # pylint: disable=protected-access
             conn = http.client.HTTPSConnection(target_url.hostname, context=ctx, timeout=DEFAULT_TIMEOUT)
         else:
             raise InvalidTargetURL("Unsupported protocol scheme")
@@ -107,14 +141,14 @@ class SecurityHeaders():
             conn.request('GET', self.target_url.path, headers=REQUEST_HEADERS)
             res = conn.getresponse()
         except (socket.gaierror, socket.timeout, ConnectionRefusedError, ssl.SSLError) as e:
-            raise UnableToConnect("Connection failed {}".format(self.target_url.hostname)) from e
+            raise UnableToConnect(f"Connection failed {self.target_url.hostname}") from e
 
         headers = res.getheaders()
         for h in headers:
             key = h[0].lower()
             if key in HEADER_STRUCTURED_LIST and key in self.headers:
                 # Scenario described in RFC 2616 section 4.2
-                self.headers[key] += ', {}'.format(h[1])
+                self.headers[key] += f', {h[1]}'
             else:
                 self.headers[key] = h[1]
 
@@ -125,12 +159,11 @@ class SecurityHeaders():
         if not self.headers:
             raise SecurityHeadersException("Headers not fetched successfully")
 
-        """ Loop through headers and evaluate the risk """
-        for header in SECURITY_HEADERS_DICT:
+        for header, settings in self.SECURITY_HEADERS_DICT.items():
             if header in self.headers:
-                eval_func = SECURITY_HEADERS_DICT[header].get('eval_func')
+                eval_func = settings.get('eval_func')
                 if not eval_func:
-                    raise SecurityHeadersException("No evaluation function found for header: {}".format(header))
+                    raise SecurityHeadersException(f"No evaluation function found for header: {header}")
                 res, notes = eval_func(self.headers[header])
                 retval[header] = {
                     'defined': True,
@@ -138,9 +171,8 @@ class SecurityHeaders():
                     'contents': self.headers[header],
                     'notes': notes,
                 }
-
             else:
-                warn = SECURITY_HEADERS_DICT[header].get('recommended')
+                warn = settings.get('recommended')
                 retval[header] = {'defined': False, 'warn': warn, 'contents': None, 'notes': []}
 
         for header in SERVER_VERSION_HEADERS:
@@ -154,6 +186,32 @@ class SecurityHeaders():
                 }
 
         return retval
+
+def output_cli(headers, https):
+    for header, value in headers.items():
+        if value['warn']:
+            if not value['defined']:
+                utils.print_warning(f"Header '{header}' is missing")
+            else:
+                utils.print_warning(f"Header '{header}' contains value '{value['contents']}")
+                for note in value['notes']:
+                    print(f" * {note}")
+        else:
+            if not value['defined']:
+                utils.print_ok(f"Header '{header}' is missing")
+            else:
+                utils.print_ok(f"Header '{header}' contains a proper value")
+
+    msg_map = {
+        'supported': 'HTTPS supported',
+        'certvalid': 'HTTPS valid certificate',
+        'redirect': 'HTTP -> HTTPS automatic redirect',
+    }
+    for key in https:
+        if https[key]:
+            utils.print_ok(msg_map[key])
+        else:
+            utils.print_warning(msg_map[key])
 
 
 def main():
@@ -177,36 +235,8 @@ def main():
         print("Failed to fetch headers, exiting...")
         sys.exit(1)
 
-    for header, value in headers.items():
-        if value['warn']:
-            if not value['defined']:
-                utils.print_warning("Header '{}' is missing".format(header))
-            else:
-                utils.print_warning("Header '{}' contains value '{}".format(header, value['contents']))
-                for n in value['notes']:
-                    print(" * {}".format(n))
-        else:
-            if not value['defined']:
-                utils.print_ok("Header '{}' is missing".format(header))
-            else:
-                utils.print_ok("Header '{}' contains a proper value".format(header))
-
     https = header_check.test_https()
-    if https['supported']:
-        utils.print_ok("HTTPS supported")
-    else:
-        utils.print_warning("HTTPS supported")
-
-    if https['certvalid']:
-        utils.print_ok("HTTPS valid certificate")
-    else:
-        utils.print_warning("HTTPS valid certificate")
-
-    if header_check.test_http_to_https():
-        utils.print_ok("HTTP -> HTTPS redirect")
-    else:
-        utils.print_warning("HTTP -> HTTPS redirect")
-
+    output_cli(headers, https)
 
 if __name__ == "__main__":
     main()
