@@ -1,7 +1,8 @@
 import re
 from typing import Tuple
 
-from .constants import EVAL_WARN, EVAL_OK, UNSAFE_CSP_RULES, RESTRICTED_PERM_POLICY_FEATURES
+from .constants import EVAL_WARN, EVAL_OK, UNSAFE_CSP_RULES, RESTRICTED_PERM_POLICY_FEATURES, WARN_COLOR, OK_COLOR, \
+    END_COLOR
 
 
 def eval_x_frame_options(contents: str) -> Tuple[int, list]:
@@ -42,22 +43,23 @@ def eval_csp(contents: str) -> Tuple[int, list]:
 
     csp_parsed = csp_parser(contents)
 
-    for rule in UNSAFE_CSP_RULES:
+    for rule, values in UNSAFE_CSP_RULES.items():
         if rule not in csp_parsed:
             if '-src' in rule and 'default-src' in csp_parsed:
                 # fallback to default-src
-                for unsafe_src in UNSAFE_CSP_RULES[rule]:
+                for unsafe_src in values:
                     if unsafe_src in csp_parsed['default-src']:
                         csp_unsafe = True
-                        csp_notes.append("Directive {} not defined, and default-src contains unsafe source {}".format(
-                            rule, unsafe_src))
+                        csp_notes.append(
+                            f"Directive {rule} not defined, and default-src contains unsafe source {unsafe_src}"
+                        )
             elif 'default-src' not in csp_parsed:
-                csp_notes.append("No directive {} nor default-src defined in the Content Security Policy".format(rule))
+                csp_notes.append(f"No directive {rule} nor default-src defined in the Content Security Policy")
                 csp_unsafe = True
         else:
-            for unsafe_src in UNSAFE_CSP_RULES[rule]:
+            for unsafe_src in values:
                 if unsafe_src in csp_parsed[rule]:
-                    csp_notes.append("Unsafe source {} in directive {}".format(unsafe_src, rule))
+                    csp_notes.append(f"Unsafe source {unsafe_src} in directive {rule}")
                     csp_unsafe = True
 
     if csp_unsafe:
@@ -83,11 +85,10 @@ def eval_permissions_policy(contents: str) -> Tuple[int, list]:
         feat_policy = pp_parsed.get(feature)
         if feat_policy is None:
             pp_unsafe = True
-            notes.append("Privacy-sensitive feature '{}' not defined in permission-policy, always allowed.".format(
-                feature))
+            notes.append(f"Privacy-sensitive feature '{feature}' not defined in permission-policy, always allowed.")
         elif '*' in feat_policy:
             pp_unsafe = True
-            notes.append("Privacy-sensitive feature '{}' allowed from unsafe origin '*'".format(feature))
+            notes.append(f"Privacy-sensitive feature '{feature}' allowed from unsafe origin '*'")
     if pp_unsafe:
         return EVAL_WARN, notes
 
@@ -106,7 +107,7 @@ def eval_referrer_policy(contents: str) -> Tuple[int, list]:
     ]:
         return EVAL_OK, []
 
-    return EVAL_WARN, ["Unsafe contents: {}".format(contents)]
+    return EVAL_WARN, [f"Unsafe contents: {contents}"]
 
 
 def csp_parser(contents: str) -> dict:
@@ -134,12 +135,8 @@ def permissions_policy_parser(contents: str) -> dict:
 
 
 def print_ok(msg: str):
-    OK_COLOR = '\033[92m'
-    END_COLOR = '\033[0m'
-    print("{} ... [ {}OK{} ]".format(msg, OK_COLOR, END_COLOR))
+    print(f"{msg} ... [ {OK_COLOR}OK{END_COLOR} ]")
 
 
 def print_warning(msg: str):
-    WARN_COLOR = '\033[93m'
-    END_COLOR = '\033[0m'
-    print("{} ... [ {}WARN{} ]".format(msg, WARN_COLOR, END_COLOR))
+    print(f"{msg} ... [ {WARN_COLOR}WARN{END_COLOR} ]")

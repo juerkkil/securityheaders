@@ -2,13 +2,15 @@
 Python script to check HTTP security headers
 
 
-Same functionality as securityheaders.io but as Python script. Also checks some server/version headers. Written and tested using Python 3.4.
+Same functionality as securityheaders.io but as Python script. Also checks some server/version headers. Written and tested using Python 3.8.
 
 With minor modifications could be used as a library for other projects.
 
+**NOTE**: The project renamed (2024-10-19) from **securityheaders** to **secheaders** to avoid confusion with PyPI package with similar name.
+
 ## Installation
 
-The following assumes you have Python  installed and command `python` refers to python version >= 3.4.
+The following assumes you have Python  installed and command `python` refers to python version >= 3.8.
 
 ### Run without installation
 
@@ -57,7 +59,3 @@ HTTPS supported ... [ OK ]
 HTTPS valid certificate ... [ OK ]
 HTTP -> HTTPS redirect ... [ WARN ]
 ```
-
-## Note
-
-The project renamed (2024-10-19) from **securityheaders** to **secheaders** to avoid confusion with PyPI package with similar name.

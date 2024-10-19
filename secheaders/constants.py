@@ -1,5 +1,3 @@
-from . import utils
-
 # If no URL scheme defined, what to use by default
 DEFAULT_URL_SCHEME = 'https'
 DEFAULT_TIMEOUT = 10
@@ -17,6 +15,9 @@ REQUEST_HEADERS = {
 
 EVAL_WARN = 0
 EVAL_OK = 1
+OK_COLOR = '\033[92m'
+END_COLOR = '\033[0m'
+WARN_COLOR = '\033[93m'
 
 # There are no universal rules for "safe" and "unsafe" CSP directives, but we apply some common sense here to
 # catch some risky configurations
@@ -41,35 +42,3 @@ SERVER_VERSION_HEADERS = [
 HEADER_STRUCTURED_LIST = [  # Response headers that define multiple values as comma-sparated list
     'permissions-policy',
 ]
-
-SECURITY_HEADERS_DICT = {
-    'x-frame-options': {
-        'recommended': True,
-        'eval_func': utils.eval_x_frame_options,
-    },
-    'strict-transport-security': {
-        'recommended': True,
-        'eval_func': utils.eval_sts,
-    },
-    'content-security-policy': {
-        'recommended': True,
-        'eval_func': utils.eval_csp,
-    },
-    'x-content-type-options': {
-        'recommended': True,
-        'eval_func': utils.eval_content_type_options,
-    },
-    'x-xss-protection': {
-        # X-XSS-Protection is deprecated; not supported anymore, and may be even dangerous in older browsers
-        'recommended': False,
-        'eval_func': utils.eval_x_xss_protection,
-    },
-    'referrer-policy': {
-        'recommended': True,
-        'eval_func': utils.eval_referrer_policy,
-    },
-    'permissions-policy': {
-        'recommended': True,
-        'eval_func': utils.eval_permissions_policy,
-    }
-}
