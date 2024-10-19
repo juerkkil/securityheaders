@@ -7,64 +7,12 @@ import sys
 from urllib.parse import ParseResult, urlparse
 
 from . import utils
-from .constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN
+from .constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN, REQUEST_HEADERS, HEADER_STRUCTURED_LIST, \
+        SECURITY_HEADERS_DICT, SERVER_VERSION_HEADERS
 from .exceptions import SecurityHeadersException, InvalidTargetURL, UnableToConnect
 
 
 class SecurityHeaders():
-    # Let's try to imitate a legit browser to avoid being blocked / flagged as web crawler
-    REQUEST_HEADERS = {
-        'Accept': ('text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,'
-                   'application/signed-exchange;v=b3;q=0.9'),
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept-Language': 'en-GB,en;q=0.9',
-        'Cache-Control': 'max-age=0',
-        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)'
-                       'Chrome/106.0.0.0 Safari/537.36'),
-    }
-
-    SECURITY_HEADERS_DICT = {
-        'x-frame-options': {
-            'recommended': True,
-            'eval_func': utils.eval_x_frame_options,
-        },
-        'strict-transport-security': {
-            'recommended': True,
-            'eval_func': utils.eval_sts,
-        },
-        'content-security-policy': {
-            'recommended': True,
-            'eval_func': utils.eval_csp,
-        },
-        'x-content-type-options': {
-            'recommended': True,
-            'eval_func': utils.eval_content_type_options,
-        },
-        'x-xss-protection': {
-            # X-XSS-Protection is deprecated; not supported anymore, and may be even dangerous in older browsers
-            'recommended': False,
-            'eval_func': utils.eval_x_xss_protection,
-        },
-        'referrer-policy': {
-            'recommended': True,
-            'eval_func': utils.eval_referrer_policy,
-        },
-        'permissions-policy': {
-            'recommended': True,
-            'eval_func': utils.eval_permissions_policy,
-        }
-    }
-
-    SERVER_VERSION_HEADERS = [
-        'x-powered-by',
-        'server',
-        'x-aspnet-version',
-    ]
-
-    HEADER_STRUCTURED_LIST = [  # Response headers that define multiple values as comma-sparated list
-        'permissions-policy',
-    ]
-
     def __init__(self, url, max_redirects=2, no_check_certificate=False):
         parsed = urlparse(url)
         if not parsed.scheme and not parsed.netloc:
@@ -106,7 +54,7 @@ class SecurityHeaders():
                 raise InvalidTargetURL("Unsupported protocol scheme")
 
             try:
-                conn.request('GET', temp_url.path, headers=self.REQUEST_HEADERS)
+                conn.request('GET', temp_url.path, headers=REQUEST_HEADERS)
                 res = conn.getresponse()
             except (socket.gaierror, socket.timeout, ConnectionRefusedError) as e:
                 raise UnableToConnect("Connection failed {}".format(temp_url.netloc)) from e
@@ -156,7 +104,7 @@ class SecurityHeaders():
 
         conn = self.open_connection(self.target_url)
         try:
-            conn.request('GET', self.target_url.path, headers=self.REQUEST_HEADERS)
+            conn.request('GET', self.target_url.path, headers=REQUEST_HEADERS)
             res = conn.getresponse()
         except (socket.gaierror, socket.timeout, ConnectionRefusedError, ssl.SSLError) as e:
             raise UnableToConnect("Connection failed {}".format(self.target_url.hostname)) from e
@@ -164,7 +112,7 @@ class SecurityHeaders():
         headers = res.getheaders()
         for h in headers:
             key = h[0].lower()
-            if key in self.HEADER_STRUCTURED_LIST and key in self.headers:
+            if key in HEADER_STRUCTURED_LIST and key in self.headers:
                 # Scenario described in RFC 2616 section 4.2
                 self.headers[key] += ', {}'.format(h[1])
             else:
@@ -178,9 +126,9 @@ class SecurityHeaders():
             raise SecurityHeadersException("Headers not fetched successfully")
 
         """ Loop through headers and evaluate the risk """
-        for header in self.SECURITY_HEADERS_DICT:
+        for header in SECURITY_HEADERS_DICT:
             if header in self.headers:
-                eval_func = self.SECURITY_HEADERS_DICT[header].get('eval_func')
+                eval_func = SECURITY_HEADERS_DICT[header].get('eval_func')
                 if not eval_func:
                     raise SecurityHeadersException("No evaluation function found for header: {}".format(header))
                 res, notes = eval_func(self.headers[header])
@@ -192,10 +140,10 @@ class SecurityHeaders():
                 }
 
             else:
-                warn = self.SECURITY_HEADERS_DICT[header].get('recommended')
+                warn = SECURITY_HEADERS_DICT[header].get('recommended')
                 retval[header] = {'defined': False, 'warn': warn, 'contents': None, 'notes': []}
 
-        for header in self.SERVER_VERSION_HEADERS:
+        for header in SERVER_VERSION_HEADERS:
             if header in self.headers:
                 res, notes = utils.eval_version_info(self.headers[header])
                 retval[header] = {
