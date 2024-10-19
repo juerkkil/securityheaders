@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secheaders"
+version = "0.1.0"
+requires-python = ">=3.4"
+authors = [
+  {name = "Jussi-Pekka Erkkilä", email = "jp.erkkila@gmail.com"},
+]
+maintainers = [
+  {name = "Jussi-Pekka Erkkilä", email = "jp.erkkila@gmail.com"}
+]
+description = "Scan HTTP security headers"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["web", "security"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Topic :: Security",
+]
+
+[project.scripts]
+secheaders = "secheaders.securityheaders:main"
+
