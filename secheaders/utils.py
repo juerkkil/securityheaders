@@ -135,8 +135,8 @@ def permissions_policy_parser(contents: str) -> dict:
 
 
 def print_ok(msg: str):
-    print(f"{msg} ... [ {OK_COLOR}OK{END_COLOR} ]")
+    print(f"{msg}  [ {OK_COLOR}OK{END_COLOR} ]")
 
 
 def print_warning(msg: str):
-    print(f"{msg} ... [ {WARN_COLOR}WARN{END_COLOR} ]")
+    print(f"{msg} [ {WARN_COLOR}WARN{END_COLOR} ]")
