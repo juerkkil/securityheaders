@@ -18,11 +18,12 @@ EVAL_OK = 1
 OK_COLOR = '\033[92m'
 END_COLOR = '\033[0m'
 WARN_COLOR = '\033[93m'
+HEADER_OUTPUT_MAX_LEN = 40  # longer response headers are truncated in cli output, unless -v flag used
 
 # There are no universal rules for "safe" and "unsafe" CSP directives, but we apply some common sense here to
 # catch some risky configurations
 UNSAFE_CSP_RULES = {
-    "script-src": ["*", "'unsafe-eval'", "data:", "'unsafe-inline'"],
+    "script-src": ["*", "'unsafe-eval'", "data:", "'unsafe-inline'", "http:"],
     "frame-ancestors": ["*"],
     "form-action": ["*"],
     "object-src": ["*"],

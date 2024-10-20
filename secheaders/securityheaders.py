@@ -8,7 +8,7 @@ from urllib.parse import ParseResult, urlparse
 
 from . import utils
 from .constants import DEFAULT_TIMEOUT, DEFAULT_URL_SCHEME, EVAL_WARN, REQUEST_HEADERS, HEADER_STRUCTURED_LIST, \
-        SERVER_VERSION_HEADERS
+        SERVER_VERSION_HEADERS, HEADER_OUTPUT_MAX_LEN
 from .exceptions import SecurityHeadersException, InvalidTargetURL, UnableToConnect
 
 
@@ -45,7 +45,7 @@ class SecurityHeaders():
         }
     }
 
-    def __init__(self, url, max_redirects=2, no_check_certificate=False):
+    def __init__(self, url, max_redirects=2, insecure=False):
         parsed = urlparse(url)
         if not parsed.scheme and not parsed.netloc:
             url = f"{DEFAULT_URL_SCHEME}://{url}"
@@ -56,7 +56,7 @@ class SecurityHeaders():
         self.protocol_scheme = parsed.scheme
         self.hostname = parsed.netloc
         self.path = parsed.path
-        self.verify_ssl = not no_check_certificate
+        self.verify_ssl = not insecure
         self.target_url: ParseResult = self._follow_redirect_until_response(url, max_redirects) if max_redirects > 0 \
             else parsed
         self.headers = {}
@@ -90,7 +90,7 @@ class SecurityHeaders():
             try:
                 conn.request('GET', temp_url.path, headers=REQUEST_HEADERS)
                 res = conn.getresponse()
-            except (socket.gaierror, socket.timeout, ConnectionRefusedError) as e:
+            except (socket.gaierror, socket.timeout, ConnectionRefusedError, UnicodeError) as e:
                 raise UnableToConnect(f"Connection failed {temp_url.netloc}") from e
             except ssl.SSLError as e:
                 raise UnableToConnect("SSL Error") from e
@@ -140,7 +140,7 @@ class SecurityHeaders():
         try:
             conn.request('GET', self.target_url.path, headers=REQUEST_HEADERS)
             res = conn.getresponse()
-        except (socket.gaierror, socket.timeout, ConnectionRefusedError, ssl.SSLError) as e:
+        except (socket.gaierror, socket.timeout, ConnectionRefusedError, ssl.SSLError, UnicodeError) as e:
             raise UnableToConnect(f"Connection failed {self.target_url.hostname}") from e
 
         headers = res.getheaders()
@@ -187,20 +187,25 @@ class SecurityHeaders():
 
         return retval
 
-def output_cli(headers, https):
+def output_cli(headers, https, verbose=False):
     for header, value in headers.items():
-        if value['warn']:
-            if not value['defined']:
-                utils.print_warning(f"Header '{header}' is missing")
-            else:
-                utils.print_warning(f"Header '{header}' contains value '{value['contents']}")
-                for note in value['notes']:
-                    print(f" * {note}")
+        output_str = ""
+        if not value['defined']:
+            output_str = f"Header '{header}' is missing"
         else:
-            if not value['defined']:
-                utils.print_ok(f"Header '{header}' is missing")
-            else:
-                utils.print_ok(f"Header '{header}' contains a proper value")
+            header_contents = value['contents']
+            if not verbose and len(header_contents) > HEADER_OUTPUT_MAX_LEN:
+                header_contents = f"{header_contents[0:HEADER_OUTPUT_MAX_LEN]}... (truncated)"
+
+            output_str = f"{header}: {header_contents}"
+        notes = ""
+        for note in value['notes']:
+            notes = f"{notes} * {note}\n"
+
+        print_func = utils.print_warning if value['warn'] else utils.print_ok
+        print_func(output_str)
+        if notes:
+            print(notes)
 
     msg_map = {
         'supported': 'HTTPS supported',
@@ -220,11 +225,13 @@ def main():
     parser.add_argument('url', metavar='URL', type=str, help='Target URL')
     parser.add_argument('--max-redirects', dest='max_redirects', metavar='N', default=2, type=int,
                         help='Max redirects, set 0 to disable')
-    parser.add_argument('--no-check-certificate', dest='no_check_certificate', action='store_true',
+    parser.add_argument('--insecure', dest='insecure', action='store_true',
                         help='Do not verify TLS certificate chain')
+    parser.add_argument('--verbose', '-v', dest='verbose', action='store_true',
+                        help='Verbose output')
     args = parser.parse_args()
     try:
-        header_check = SecurityHeaders(args.url, args.max_redirects, args.no_check_certificate)
+        header_check = SecurityHeaders(args.url, args.max_redirects, args.insecure)
         header_check.fetch_headers()
         headers = header_check.check_headers()
     except SecurityHeadersException as e:
@@ -236,7 +243,7 @@ def main():
         sys.exit(1)
 
     https = header_check.test_https()
-    output_cli(headers, https)
+    output_cli(headers, https, args.verbose)
 
 if __name__ == "__main__":
     main()
